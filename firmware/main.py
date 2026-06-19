@@ -10,8 +10,8 @@ import ds18x20
 from machine import ADC, Pin
 
 # ── WIFI ────────────────────────────────────────────────────────────────────
-WIFI_SSID     = "CITECCA"
-WIFI_PASSWORD = "c1t3cc4*"
+WIFI_SSID     = "Movistar"
+WIFI_PASSWORD = "nuevafibra2022lava"
 
 # ── MAPA DE PINES UNIFICADO ─────────────────────────────────────────────────
 # Actuadores
@@ -177,6 +177,12 @@ def apply_preset_rules():
 # ── WIFI Y HTTP API ─────────────────────────────────────────────────────────
 def connect_wifi():
     wlan = network.WLAN(network.STA_IF)
+    # --- LÍNEAS AGREGADAS PARA EVITAR EL WIFI INTERNAL STATE ERROR ---
+    wlan.active(False)  # Apaga la antena
+    time.sleep(0.5)     # Le da medio segundo para liberar el hardware
+    wlan.active(True)   # La vuelve a encender limpia
+    wlan.disconnect()   # Corta cualquier intento de conexión anterior
+    # -----------------------------------------------------------------
     wlan.active(True)
     if not wlan.isconnected():
         print(f"Conectando a '{WIFI_SSID}'...")
