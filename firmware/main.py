@@ -93,11 +93,31 @@ roms_ds = ds_sensor.scan()
 # 4. LECTURA DE SENSORES
 # ============================================================================
 def read_analog_sensors():
-    val_suelo = soil_adc.read()
+    # Filtro de sobremuestreo para matar el ruido del Wi-Fi
+    sum_suelo = 0
+    sum_ph = 0
+    sum_ec = 0
+    
+    for _ in range(16):
+        sum_suelo += soil_adc.read()
+        sum_ph += ph_adc.read()
+        sum_ec += ec_adc.read()
+        time.sleep_ms(2) 
+        
+    val_suelo = sum_suelo / 16.0
+    val_ph = sum_ph / 16.0
+    val_ec = sum_ec / 16.0
+    
     state["soilMoistureRaw"] = val_suelo
-    state["soilMoisturePct"] = round((val_suelo / 4095) * 100, 1)
-    state["ph"]              = round(4.0 + (ph_adc.read() / 4095.0) * 4.0, 2)
-    state["ec"]              = round((ec_adc.read() / 4095.0) * 3.0, 2)
+    
+    # HUMEDAD: Escala de 0 a 100%
+    state["soilMoisturePct"] = round((val_suelo / 4095.0) * 100.0, 1)
+    
+    # pH: Escala química completa de 0 a 14
+    state["ph"] = round((val_ph / 4095.0) * 14.0, 2)
+    
+    # EC: Escala de 0 a 3.0 mS/cm
+    state["ec"] = round((val_ec / 4095.0) * 3.0, 2)
 
 def read_dht():
     try:
