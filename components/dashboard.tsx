@@ -8,6 +8,7 @@ import {
 } from "react-native";
 import { ActuatorPanel } from "./actuator-panel";
 import { ConnectionStatus } from "./connection-status";
+import { LightScheduler } from "./light-scheduler"; // <-- Importamos el nuevo componente
 import { ScanningModal } from "./scanning-modal";
 import { SensorCard } from "./sensor-card";
 
@@ -15,6 +16,7 @@ export function Dashboard() {
   const {
     sensors,
     actuators,
+    config, // <-- Extraemos la configuración (minutos)
     isConnected,
     isInitializing,
     showDelayedMessage,
@@ -22,10 +24,11 @@ export function Dashboard() {
     isRefreshing,
     onRefresh,
     toggleActuator,
+    updateLightSchedule, // <-- Extraemos la función para guardar
     stopScanning,
   } = useESP32();
 
-  // ── NUEVO SISTEMA DE ALERTAS INDIVIDUALES CON ÍCONOS Y COLORES ──
+  // ── SISTEMA DE ALERTAS INDIVIDUALES ──
   const getAlerts = () => {
     if (!isConnected) {
       return [
@@ -41,7 +44,6 @@ export function Dashboard() {
 
     const alerts = [];
 
-    // Alertas de Suelo
     if (sensors.soilMoisture < 40) {
       alerts.push({
         id: "soil",
@@ -52,7 +54,6 @@ export function Dashboard() {
       });
     }
 
-    // Alertas de Clima
     if (sensors.temperature > 28) {
       alerts.push({
         id: "temp_hi",
@@ -72,7 +73,6 @@ export function Dashboard() {
       });
     }
 
-    // Alertas de Nutrientes (pH)
     if (sensors.ph < 6.0 && sensors.ph > 0) {
       alerts.push({
         id: "ph_lo",
@@ -92,7 +92,6 @@ export function Dashboard() {
       });
     }
 
-    // Alertas de Nutrientes (EC)
     if (sensors.ec < 0.8 && sensors.ec > 0) {
       alerts.push({
         id: "ec_lo",
@@ -171,7 +170,6 @@ export function Dashboard() {
                     </Text>
                   </View>
 
-                  {/* Contenedor Flex para que las "píldoras" se acomoden solas */}
                   <View style={styles.badgesContainer}>
                     {activeAlerts.map((alert) => (
                       <View
@@ -262,7 +260,17 @@ export function Dashboard() {
               onDecrease={async () => {}}
             />
 
-            <Text style={styles.sectionTitle}>Actuadores</Text>
+            <Text style={styles.sectionTitle}>Actuadores y Reglas</Text>
+
+            {/* ── PANEL DE CONFIGURACIÓN DE LUZ ── */}
+            <LightScheduler
+              startMinutes={config.lightStart}
+              endMinutes={config.lightEnd}
+              isLightsOn={actuators.lights}
+              onSave={updateLightSchedule}
+            />
+
+            {/* ── PANEL DE ACTUADORES MANUALES ── */}
             <ActuatorPanel
               extractor={actuators.extractor}
               pump={actuators.pump}
@@ -296,7 +304,6 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 16, color: "#DCFCE7", marginTop: 4 },
   content: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 32 },
 
-  // Estilos de la tarjeta de estado general
   statusCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
@@ -305,13 +312,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#DCFCE7",
   },
-  statusCardAlert: { borderColor: "#FECACA", backgroundColor: "#FEF2F2" }, // Fondo rojizo tenue cuando hay alertas
+  statusCardAlert: { borderColor: "#FECACA", backgroundColor: "#FEF2F2" },
   statusContent: { flexDirection: "row", alignItems: "center", gap: 12 },
   emojiGiant: { fontSize: 28 },
   statusTitle: { fontSize: 16, fontWeight: "600", color: "#374151" },
   statusOk: { fontSize: 14, fontWeight: "500", color: "#16A34A" },
 
-  // Estilos del nuevo sistema de alertas (Badges)
   alertHeader: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
   alertHeaderEmoji: { fontSize: 18, marginRight: 8 },
   alertHeaderTitle: { fontSize: 16, fontWeight: "700", color: "#DC2626" },

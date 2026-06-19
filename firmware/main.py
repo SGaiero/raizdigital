@@ -1,6 +1,4 @@
-# main.py — RaizDigital Firmware
-# Arquitectura basada en eventos y bloqueos no bloqueantes
-
+# main.py — RaizDigital Firmware (Con Fotoperíodo y NTP)
 import network
 import usocket as socket
 import ujson
@@ -9,6 +7,7 @@ import dht
 import onewire
 import ds18x20
 import machine
+import ntptime
 from machine import ADC, Pin
 
 # ============================================================================
@@ -16,17 +15,27 @@ from machine import ADC, Pin
 # ============================================================================
 CONFIG_FILE = "config.json"
 
+def load_config():
+    try:
+        with open(CONFIG_FILE, "r") as f:
+            conf = ujson.loads(f.read())
+            # Horarios por defecto si es la primera vez (18/6 vegetativo)
+            if "light_start" not in conf: conf["light_start"] = 6
+            if "light_end" not in conf: conf["light_end"] = 24
+            return conf
+    except:
+        return {"ssid": "", "password": "", "light_start": 6, "light_end": 24}
+
+def save_config_dict(data):
+    with open(CONFIG_FILE, "w") as f:
+        f.write(ujson.dumps(data))
+
+system_config = load_config()
+
 PRESETS = {
     "feminizada_vegetativo": {
-        "HORAS_LUZ": 18, 
-        "TEMP_MAX": 26, 
-        "HUM_MAX": 70, 
-        "PH_MIN": 6.0, 
-        "PH_MAX": 6.5,
-        "EC_MIN": 0.8, 
-        "EC_MAX": 1.2, 
-        "SUSTRATO_SECO": 1200, 
-        "TEMP_SUSTRATO_MIN": 20
+        "TEMP_MAX": 26, "HUM_MAX": 70, 
+        "SUSTRATO_SECO": 1200, "TEMP_SUSTRATO_MIN": 20
     }
 }
 
@@ -36,55 +45,28 @@ PRESETS = {
 perfil_activo = PRESETS["feminizada_vegetativo"]
 
 state = {
-    "soilMoistureRaw": 0, 
-    "soilMoisturePct": 0, 
-    "temperature": 22.0, 
-    "humidity": 55.0,
-    "waterTemp": 20.0, 
-    "ph": 6.0, 
-    "ec": 1.0,
-    "lights": False, 
-    "extractor": False, 
-    "pump": False, 
-    "heater": False, 
-    "auto": True,
+    "soilMoistureRaw": 0, "soilMoisturePct": 0, "temperature": 22.0, "humidity": 55.0,
+    "waterTemp": 20.0, "ph": 6.0, "ec": 1.0,
+    "lights": False, "extractor": False, "pump": False, "heater": False, "auto": True,
 }
 
-# Controladores de tiempo para sensores lentos (DS18B20)
-ds_timing = {
-    "last_request": 0,
-    "converting": False
-}
+ds_timing = {"last_request": 0, "converting": False}
 
 # ============================================================================
 # 3. CONFIGURACIÓN DE HARDWARE (PINOUT)
 # ============================================================================
-# Actuadores
 lights_pin    = Pin(18, Pin.OUT, value=0)
 extractor_pin = Pin(21, Pin.OUT, value=0)
 pump_pin      = Pin(5,  Pin.OUT, value=0)
 heater_pin    = Pin(19, Pin.OUT, value=0)
 
-PIN_MAP = {
-    "lights": lights_pin, 
-    "extractor": extractor_pin, 
-    "pump": pump_pin, 
-    "heater": heater_pin
-}
+PIN_MAP = {"lights": lights_pin, "extractor": extractor_pin, "pump": pump_pin, "heater": heater_pin}
 
-# Sensores Analógicos (ADC1)
-soil_adc = ADC(Pin(32))   
-soil_adc.atten(ADC.ATTN_11DB)
+soil_adc = ADC(Pin(32)); soil_adc.atten(ADC.ATTN_11DB)
+ph_adc = ADC(Pin(33));   ph_adc.atten(ADC.ATTN_11DB)
+ec_adc = ADC(Pin(35));   ec_adc.atten(ADC.ATTN_11DB)
 
-ph_adc = ADC(Pin(33))     
-ph_adc.atten(ADC.ATTN_11DB)
-
-ec_adc = ADC(Pin(35))     
-ec_adc.atten(ADC.ATTN_11DB)
-
-# Sensores Digitales
 dht_sensor = dht.DHT11(Pin(14)) 
-
 bus_onewire = onewire.OneWire(Pin(4))
 ds_sensor = ds18x20.DS18X20(bus_onewire)
 roms_ds = ds_sensor.scan()
@@ -93,15 +75,9 @@ roms_ds = ds_sensor.scan()
 # 4. LECTURA DE SENSORES
 # ============================================================================
 def read_analog_sensors():
-    # Filtro de sobremuestreo para matar el ruido del Wi-Fi
-    sum_suelo = 0
-    sum_ph = 0
-    sum_ec = 0
-    
+    sum_suelo = 0; sum_ph = 0; sum_ec = 0
     for _ in range(16):
-        sum_suelo += soil_adc.read()
-        sum_ph += ph_adc.read()
-        sum_ec += ec_adc.read()
+        sum_suelo += soil_adc.read(); sum_ph += ph_adc.read(); sum_ec += ec_adc.read()
         time.sleep_ms(2) 
         
     val_suelo = sum_suelo / 16.0
@@ -109,14 +85,8 @@ def read_analog_sensors():
     val_ec = sum_ec / 16.0
     
     state["soilMoistureRaw"] = val_suelo
-    
-    # HUMEDAD: Escala de 0 a 100%
     state["soilMoisturePct"] = round((val_suelo / 4095.0) * 100.0, 1)
-    
-    # pH: Escala química completa de 0 a 14
     state["ph"] = round((val_ph / 4095.0) * 14.0, 2)
-    
-    # EC: Escala de 0 a 3.0 mS/cm
     state["ec"] = round((val_ec / 4095.0) * 3.0, 2)
 
 def read_dht():
@@ -124,28 +94,22 @@ def read_dht():
         dht_sensor.measure()
         t, h = dht_sensor.temperature(), dht_sensor.humidity()
         if 0 <= t <= 60 and 0 <= h <= 100:
-            state["temperature"] = t
-            state["humidity"]    = h
-    except Exception:
-        pass
+            state["temperature"] = t; state["humidity"] = h
+    except: pass
 
 def read_ds18b20_non_blocking():
     now = time.ticks_ms()
     if not roms_ds: return
-
     if not ds_timing["converting"]:
         ds_sensor.convert_temp()
-        ds_timing["last_request"] = now
-        ds_timing["converting"] = True
+        ds_timing["last_request"] = now; ds_timing["converting"] = True
     elif time.ticks_diff(now, ds_timing["last_request"]) > 750:
-        try: 
-            state["waterTemp"] = round(ds_sensor.read_temp(roms_ds[0]), 1)
-        except Exception: 
-            pass
+        try: state["waterTemp"] = round(ds_sensor.read_temp(roms_ds[0]), 1)
+        except: pass
         ds_timing["converting"] = False
 
 # ============================================================================
-# 5. LÓGICA DE CONTROL (ACTUADORES Y REGLAS)
+# 5. LÓGICA DE CONTROL (RELOJ Y REGLAS)
 # ============================================================================
 def set_actuator(actuator, is_active, source="manual"):
     state[actuator] = is_active
@@ -154,131 +118,116 @@ def set_actuator(actuator, is_active, source="manual"):
 def apply_preset_rules():
     if not state["auto"]: return
     
+    # === FOTOPERÍODO EXACTO BASADO EN RTC ===
     hora_actual = time.localtime()[3] 
-    temp = state["temperature"]
-    hum = state["humidity"]
+    start = system_config.get("light_start", 6)
+    end = system_config.get("light_end", 24)
+    
+    if start < end:
+        luz_encendida = start <= hora_actual < end
+    else: # Si cruza la medianoche (ej: prende a las 20, apaga a las 6)
+        luz_encendida = hora_actual >= start or hora_actual < end
 
-    # Regla de Luz
-    if hora_actual < perfil_activo["HORAS_LUZ"] and not state["lights"]: 
-        set_actuator("lights", True, "auto")
-    elif hora_actual >= perfil_activo["HORAS_LUZ"] and state["lights"]: 
-        set_actuator("lights", False, "auto")
+    if luz_encendida and not state["lights"]: set_actuator("lights", True, "auto")
+    elif not luz_encendida and state["lights"]: set_actuator("lights", False, "auto")
 
-    # Regla de Clima (Extractor)
+    # Clima y Riego
+    temp = state["temperature"]; hum = state["humidity"]
     if temp > perfil_activo["TEMP_MAX"] or hum > perfil_activo["HUM_MAX"]:
         if not state["extractor"]: set_actuator("extractor", True, "auto")
     elif temp < (perfil_activo["TEMP_MAX"] - 2) and hum < (perfil_activo["HUM_MAX"] - 10):
         if state["extractor"]: set_actuator("extractor", False, "auto")
 
-    # Regla de Temperatura de Agua (Calentador)
     if state["waterTemp"] < perfil_activo["TEMP_SUSTRATO_MIN"]:
         if not state["heater"]: set_actuator("heater", True, "auto")
     elif state["waterTemp"] >= (perfil_activo["TEMP_SUSTRATO_MIN"] + 2):
         if state["heater"]: set_actuator("heater", False, "auto")
 
-    # Regla de Riego (Bomba)
     if state["soilMoistureRaw"] < perfil_activo["SUSTRATO_SECO"]:
         if not state["pump"]: set_actuator("pump", True, "auto")
     else:
         if state["pump"]: set_actuator("pump", False, "auto")
 
 # ============================================================================
-# 6. GESTIÓN DE RED (WI-FI Y AP)
+# 6. GESTIÓN DE RED Y SINCRONIZACIÓN NTP
 # ============================================================================
-def load_config():
-    try:
-        with open(CONFIG_FILE, "r") as f:
-            return ujson.loads(f.read())
-    except:
-        return {"ssid": "", "password": ""}
-
-def save_config(ssid, password):
-    with open(CONFIG_FILE, "w") as f:
-        f.write(ujson.dumps({"ssid": ssid, "password": password}))
-
 def connect_wifi_or_ap():
-    config = load_config()
-    
     wlan = network.WLAN(network.STA_IF)
-    wlan.active(False)
-    time.sleep(0.5)
-    wlan.active(True)
-    wlan.disconnect()
+    wlan.active(False); time.sleep(0.5); wlan.active(True); wlan.disconnect()
 
-    if config["ssid"]:
-        print(f"Intentando conectar a '{config['ssid']}'...")
-        wlan.connect(config["ssid"], config["password"])
+    if system_config.get("ssid"):
+        print(f"Conectando a '{system_config['ssid']}'...")
+        wlan.connect(system_config["ssid"], system_config.get("password", ""))
         for _ in range(30): 
             if wlan.isconnected():
                 ip = wlan.ifconfig()[0]
-                print(f"WiFi OK — IP: {ip}")
+                
+                # SINCRONIZACIÓN DE RELOJ (UTC-3)
+                try:
+                    print("Sincronizando reloj por internet (NTP)...")
+                    ntptime.settime()
+                    tm = time.localtime(time.time() - (3 * 3600)) # Ajuste de zona horaria
+                    machine.RTC().datetime((tm[0], tm[1], tm[2], tm[6], tm[3], tm[4], tm[5], 0))
+                    print(f"Reloj ajustado: {tm[3]:02d}:{tm[4]:02d} hrs")
+                except Exception as e:
+                    print("No se pudo sincronizar la hora:", e)
+
                 return ip
             time.sleep(0.5)
-        print("ERROR: No se pudo conectar a la red guardada.")
     
-    # Inicia como Access Point si no hay Wi-Fi
-    print("Iniciando Modo Configuración (AP)...")
+    print("Iniciando AP de Configuración...")
     wlan.active(False) 
     ap = network.WLAN(network.AP_IF)
     ap.active(True)
-    try: 
-        ap.config(essid="RaizDigital-Setup", password="raizdigital")
-    except Exception: 
-        ap.config(ssid="RaizDigital-Setup", password="raizdigital")
-    
-    ip = ap.ifconfig()[0] 
-    print(f">> ABRÍ TU CELULAR, CONECTATE AL WI-FI 'RaizDigital-Setup' (clave: raizdigital)")
-    return ip
+    try: ap.config(essid="RaizDigital-Setup", password="raizdigital")
+    except: ap.config(ssid="RaizDigital-Setup", password="raizdigital")
+    return ap.ifconfig()[0] 
 
 # ============================================================================
 # 7. SERVIDOR HTTP (RUTEO DE API)
 # ============================================================================
 def json_response(conn, data, status="200 OK"):
     body = ujson.dumps(data)
-    conn.send((f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\n"
-               f"Access-Control-Allow-Origin: *\r\nContent-Length: {len(body)}\r\n"
-               f"Connection: close\r\n\r\n{body}").encode())
+    conn.send((f"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}").encode())
 
 def handle_request(conn, method, path, body):
-    # --- Router de la API ---
-    if path == "/health": 
-        return json_response(conn, {"status": "ok"})
+    global system_config
+    if path == "/health": return json_response(conn, {"status": "ok"})
     
+    # Configuración de Reloj
+    elif path == "/api/config" and method == "GET":
+        return json_response(conn, {"lightStart": system_config.get("light_start"), "lightEnd": system_config.get("light_end")})
+        
+    elif path == "/api/config" and method == "POST":
+        if body and "lightStart" in body and "lightEnd" in body:
+            system_config["light_start"] = int(body["lightStart"])
+            system_config["light_end"] = int(body["lightEnd"])
+            save_config_dict(system_config)
+            return json_response(conn, {"success": True})
+        return json_response(conn, {"error": "Datos inválidos"}, "400 Bad Request")
+
+    # Configuración de Wi-Fi
     elif path == "/api/wifi" and method == "POST":
         if body and "ssid" in body:
-            save_config(body["ssid"], body.get("password", ""))
+            system_config["ssid"] = body["ssid"]
+            system_config["password"] = body.get("password", "")
+            save_config_dict(system_config)
             json_response(conn, {"success": True, "message": "Reiniciando..."})
-            time.sleep(1)
-            machine.reset()
+            time.sleep(1); machine.reset()
         return json_response(conn, {"error": "Faltan datos"}, "400 Bad Request")
 
     elif path == "/api/sensors" and method == "GET":
-        return json_response(conn, {
-            "soilMoisturePct": state["soilMoisturePct"], 
-            "temperature": state["temperature"], 
-            "humidity": state["humidity"], 
-            "waterTemp": state["waterTemp"], 
-            "ph": state["ph"], 
-            "ec": state["ec"]
-        })
+        return json_response(conn, {"soilMoisturePct": state["soilMoisturePct"], "temperature": state["temperature"], "humidity": state["humidity"], "waterTemp": state["waterTemp"], "ph": state["ph"], "ec": state["ec"]})
 
     elif path == "/api/actuators" and method == "GET":
-        return json_response(conn, {
-            "extractor": state["extractor"], 
-            "pump": state["pump"], 
-            "auto": state["auto"]
-        })
+        return json_response(conn, {"extractor": state["extractor"], "pump": state["pump"], "lights": state["lights"], "auto": state["auto"]})
 
     elif path.startswith("/api/actuators/") and method == "POST":
         actuator = path.split("/")[-1]
-        if actuator not in PIN_MAP: 
-            return json_response(conn, {"error": "Actuador invalido"}, "400 Bad Request")
-        
-        is_active = body.get("isActive", False) if body else False
-        set_actuator(actuator, is_active, source="app")
+        if actuator not in PIN_MAP: return json_response(conn, {"error": "Invalido"}, "400 Bad Request")
+        set_actuator(actuator, body.get("isActive", False) if body else False, source="app")
         return json_response(conn, {"success": True})
         
-    # Ruta por defecto
     return json_response(conn, {"error": "Not found"}, "404 Not Found")
 
 def parse_and_route_request(conn):
@@ -287,8 +236,6 @@ def parse_and_route_request(conn):
         raw = conn.recv(2048)
         if b"\r\n\r\n" in raw:
             header, _, body = raw.partition(b"\r\n\r\n")
-            
-            # Extraer headers para el Content-Length
             for line in header.split(b"\r\n"):
                 if line.lower().startswith(b"content-length:"):
                     try:
@@ -296,79 +243,53 @@ def parse_and_route_request(conn):
                         while len(body) < cl:
                             chunk = conn.recv(cl - len(body))
                             if not chunk: break
-                            raw += chunk
-                            body += chunk
-                    except Exception: pass
+                            raw += chunk; body += chunk
+                    except: pass
                     break
-                    
-            # Parsear ruta y cuerpo
             header_text = header.decode("utf-8", "ignore")
             body_text = body.decode("utf-8", "ignore")
-            
             method, path, *_ = header_text.split("\r\n")[0].split(" ")
             body_json = ujson.loads(body_text) if body_text.strip() else None
-            
-            if method and path: 
-                handle_request(conn, method, path, body_json)
-                
-    except Exception:
-        pass
+            if method and path: handle_request(conn, method, path, body_json)
+    except: pass
 
 # ============================================================================
-# 8. BUCLE PRINCIPAL (MAIN)
+# 8. MAIN LOOP
 # ============================================================================
 def main():
     ip = connect_wifi_or_ap()
     if not ip: return
 
-    # Setup del Socket (Servidor Web)
     addr = socket.getaddrinfo("0.0.0.0", 80)[0][-1]
     srv = socket.socket()
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind(addr)
-    srv.listen(5)
-    srv.settimeout(0.02) # Timeout muy corto para no bloquear el bucle de sensores
+    srv.bind(addr); srv.listen(5); srv.settimeout(0.02) 
     
-    print(f"\n✅ Servidor listo en http://{ip}/")
-    print("El ESP32 ya debería ser visible para el Auto-Discovery de la app.\n")
-    
-    # Timers del bucle
-    last_read = 0
-    last_dht = 0
-    last_print = 0
+    last_read, last_dht, last_print = 0, 0, 0
 
     while True:
         now = time.time()
-        
-        # 1. Tareas de altísima prioridad (No bloqueantes)
         read_ds18b20_non_blocking()
 
-        # 2. Tareas de prioridad media (Sensores analógicos y reglas: 1hz)
         if now - last_read >= 1:
-            read_analog_sensors()
-            apply_preset_rules()
+            read_analog_sensors(); apply_preset_rules()
             last_read = now
 
-        # 3. Tareas de baja prioridad (DHT22: 0.2hz)
         if now - last_dht >= 5:
             read_dht()
             last_dht = now
             
-        # 4. Debug / Telemetría local
         if now - last_print >= 5:
-            print(f"[{time.localtime()[3]}:00] Temp: {state['temperature']}°C | Hum: {state['humidity']}% | Suelo: {state['soilMoisturePct']}%")
+            # Imprimimos la hora del reloj interno (RTC) para que veas que funciona
+            hora_str = f"{time.localtime()[3]:02d}:{time.localtime()[4]:02d}"
+            print(f"[{hora_str}] Temp: {state['temperature']}°C | Hum: {state['humidity']}% | Suelo: {state['soilMoisturePct']}% | pH: {state['ph']} | EC: {state['ec']}")
             last_print = now
 
-        # 5. Escucha de red (API HTTP)
         try:
             conn, _ = srv.accept()
             conn.settimeout(2)
-            try:
-                parse_and_route_request(conn)
-            finally: 
-                conn.close()
-        except OSError: 
-            pass # Timeout normal, no hay peticiones web entrantes
+            try: parse_and_route_request(conn)
+            finally: conn.close()
+        except OSError: pass 
 
-# Punto de entrada
 main()

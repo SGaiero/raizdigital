@@ -13,6 +13,12 @@ export interface SensorData {
 export interface ActuatorStatus {
   extractor: boolean;
   pump: boolean;
+  lights: boolean;
+}
+
+export interface SystemConfig {
+  lightStart: number;
+  lightEnd: number;
 }
 
 export type ActuatorKey = keyof ActuatorStatus;
@@ -155,7 +161,11 @@ class ESP32Service {
     const response = await this.fetchWithTimeout(this.getUrl("/api/actuators"));
     if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
     const data = await response.json();
-    return { extractor: data.extractor ?? false, pump: data.pump ?? false };
+    return {
+      extractor: data.extractor ?? false,
+      pump: data.pump ?? false,
+      lights: data.lights ?? false,
+    };
   }
 
   async toggleActuator(
@@ -184,6 +194,20 @@ class ESP32Service {
     } catch {
       return false;
     }
+  }
+
+  async getConfig(): Promise<SystemConfig> {
+    const response = await this.fetchWithTimeout(this.getUrl("/api/config"));
+    if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
+    return await response.json();
+  }
+
+  async updateConfig(lightStart: number, lightEnd: number): Promise<void> {
+    const response = await this.fetchWithTimeout(this.getUrl("/api/config"), {
+      method: "POST",
+      body: JSON.stringify({ lightStart, lightEnd }),
+    });
+    if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
   }
 }
 

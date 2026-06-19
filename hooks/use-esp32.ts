@@ -10,7 +10,13 @@ export function useESP32() {
     ph: 0,
     ec: 0,
   });
-  const [actuators, setActuators] = useState({ extractor: false, pump: false });
+  const [actuators, setActuators] = useState({
+    extractor: false,
+    pump: false,
+    lights: false,
+  });
+  // 360 = 06:00 | 1439 = 23:59
+  const [config, setConfig] = useState({ lightStart: 360, lightEnd: 1439 }); // <--- Estado para el reloj
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | undefined>();
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -20,11 +26,10 @@ export function useESP32() {
 
   const isScanningRef = useRef(true);
 
-  // Motor de Búsqueda
+  // Motor de Búsqueda ... (queda igual)
   useEffect(() => {
     let mounted = true;
     isScanningRef.current = true;
-
     const connectLoop = async () => {
       let vueltas = 0;
       while (mounted && isScanningRef.current) {
@@ -36,7 +41,6 @@ export function useESP32() {
           }
           break;
         }
-
         const found = await esp32Service.autoDiscover([
           "192.168.1",
           "192.168.0",
@@ -50,13 +54,11 @@ export function useESP32() {
           }
           break;
         }
-
         vueltas++;
         if (vueltas >= 3 && mounted) setShowDelayedMessage(true);
         await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     };
-
     connectLoop();
     return () => {
       mounted = false;
@@ -64,13 +66,16 @@ export function useESP32() {
     };
   }, []);
 
-  // Carga de datos normal
+  // Carga de datos
   const loadData = useCallback(async () => {
     try {
-      const [sensorData, actuatorStatus] = await Promise.all([
+      // 🚨 AGREGAMOS EL getConfig() AQUÍ:
+      const [sensorData, actuatorStatus, sysConfig] = await Promise.all([
         esp32Service.getSensorData(),
         esp32Service.getActuatorStatus(),
+        esp32Service.getConfig(),
       ]);
+
       setSensors({
         soilMoisture: sensorData.soilMoisture,
         temperature: sensorData.temperature,
@@ -82,7 +87,9 @@ export function useESP32() {
       setActuators({
         extractor: actuatorStatus.extractor,
         pump: actuatorStatus.pump,
+        lights: actuatorStatus.lights,
       });
+      setConfig(sysConfig);
       setIsConnected(true);
       setLastUpdate(new Date());
     } catch {
@@ -90,7 +97,6 @@ export function useESP32() {
     }
   }, []);
 
-  // Bucle de refresco (Polling)
   useEffect(() => {
     if (isInitializing) return;
     loadData();
@@ -113,6 +119,12 @@ export function useESP32() {
     } catch {}
   };
 
+  // 🚨 NUEVA FUNCIÓN PARA GUARDAR HORARIO
+  const updateLightSchedule = async (start: number, end: number) => {
+    await esp32Service.updateConfig(start, end);
+    setConfig({ lightStart: start, lightEnd: end });
+  };
+
   const stopScanning = () => {
     isScanningRef.current = false;
     setIsInitializing(false);
@@ -121,6 +133,7 @@ export function useESP32() {
   return {
     sensors,
     actuators,
+    config,
     isConnected,
     isInitializing,
     showDelayedMessage,
@@ -128,6 +141,7 @@ export function useESP32() {
     isRefreshing,
     onRefresh,
     toggleActuator,
+    updateLightSchedule,
     stopScanning,
   };
 }

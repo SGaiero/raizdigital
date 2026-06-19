@@ -1,131 +1,167 @@
-import type { ActuatorKey } from "@/services/esp32-service";
+import { type ActuatorKey } from "@/services/esp32-service";
 import { Feather } from "@expo/vector-icons";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
 interface ActuatorPanelProps {
   extractor: boolean;
   pump: boolean;
-  onToggle: (actuator: ActuatorKey) => void;
+  // lights: boolean; // <-- Agregamos la luz
+  onToggle: (actuator: ActuatorKey) => Promise<void>;
 }
-
-const ACTUATORS = [
-  {
-    key: "extractor" as ActuatorKey,
-    label: "Extractor",
-    icon: "wind" as const,
-    color: "#3B82F6",
-    gpio: "GPIO 21",
-  },
-  {
-    key: "pump" as ActuatorKey,
-    label: "Bomba",
-    icon: "droplet" as const,
-    color: "#06B6D4",
-    gpio: "GPIO 5",
-  },
-];
 
 export function ActuatorPanel({
   extractor,
   pump,
+  // lights,
   onToggle,
 }: ActuatorPanelProps) {
-  const values: Record<ActuatorKey, boolean> = { extractor, pump };
+  // Componente interno para que todas las tarjetas sean idénticas
+  const ActuatorCard = ({
+    name,
+    isActive,
+    iconName,
+    actuatorKey,
+    activeColor,
+    activeBg,
+  }: {
+    name: string;
+    isActive: boolean;
+    iconName: keyof typeof Feather.glyphMap;
+    actuatorKey: ActuatorKey;
+    activeColor: string;
+    activeBg: string;
+  }) => (
+    <Pressable
+      style={[
+        styles.card,
+        isActive
+          ? { borderColor: activeColor, backgroundColor: "#FAFAFA" }
+          : {},
+      ]}
+      onPress={() => onToggle(actuatorKey)}
+    >
+      <View
+        style={[
+          styles.iconContainer,
+          { backgroundColor: isActive ? activeBg : "#F3F4F6" },
+        ]}
+      >
+        <Feather
+          name={iconName}
+          size={24}
+          color={isActive ? activeColor : "#9CA3AF"}
+        />
+      </View>
+
+      <View style={styles.textContainer}>
+        <Text style={styles.name}>{name}</Text>
+        <Text
+          style={[styles.status, { color: isActive ? activeColor : "#6B7280" }]}
+        >
+          {isActive ? "ENCENDIDO" : "APAGADO"}
+        </Text>
+      </View>
+
+      {/* Switch visual */}
+      <View
+        style={[
+          styles.toggleTrack,
+          { backgroundColor: isActive ? activeColor : "#E5E7EB" },
+        ]}
+      >
+        <View
+          style={[styles.toggleKnob, isActive ? styles.toggleKnobActive : {}]}
+        />
+      </View>
+    </Pressable>
+  );
 
   return (
-    <View style={styles.row}>
-      {ACTUATORS.map(({ key, label, icon, color, gpio }) => {
-        const active = values[key];
-        return (
-          <Pressable
-            key={key}
-            onPress={() => onToggle(key)}
-            style={({ pressed }) => [
-              styles.card,
-              { borderColor: active ? color : "#E5E7EB" },
-              active && { backgroundColor: color + "10" },
-              pressed && styles.cardPressed,
-            ]}
-          >
-            <View
-              style={[
-                styles.iconBadge,
-                { backgroundColor: active ? color : "#F3F4F6" },
-              ]}
-            >
-              <Feather
-                name={icon}
-                size={22}
-                color={active ? "#FFFFFF" : "#9CA3AF"}
-              />
-            </View>
-            <Text style={[styles.label, { color: active ? color : "#6B7280" }]}>
-              {label}
-            </Text>
-            <Text style={styles.gpio}>{gpio}</Text>
-            <View
-              style={[
-                styles.badge,
-                { backgroundColor: active ? color + "20" : "#F3F4F6" },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.badgeText,
-                  { color: active ? color : "#9CA3AF" },
-                ]}
-              >
-                {active ? "ON" : "OFF"}
-              </Text>
-            </View>
-          </Pressable>
-        );
-      })}
+    <View style={styles.container}>
+      <ActuatorCard
+        name="Extractor de Aire"
+        isActive={extractor}
+        iconName="wind"
+        actuatorKey="extractor"
+        activeColor="#0284C7" // Azul cielo
+        activeBg="#E0F2FE"
+      />
+
+      <ActuatorCard
+        name="Bomba de Riego"
+        isActive={pump}
+        iconName="droplet"
+        actuatorKey="pump"
+        activeColor="#2563EB" // Azul agua
+        activeBg="#DBEAFE"
+      />
+
+      {/* <ActuatorCard
+        name="Luz (Fotoperíodo)"
+        isActive={lights}
+        iconName="sun"
+        actuatorKey="lights"
+        activeColor="#D97706" // Ámbar/Naranja
+        activeBg="#FEF3C7"
+      /> */}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  row: {
-    flexDirection: "row",
-    gap: 12,
+  container: {
+    gap: 12, // Espacio entre las tarjetas
     marginBottom: 24,
   },
   card: {
-    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#FFFFFF",
+    padding: 16,
     borderRadius: 16,
-    borderWidth: 2,
-    padding: 12,
-    alignItems: "center",
-    gap: 8,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
   },
-  cardPressed: {
-    opacity: 0.75,
-  },
-  iconBadge: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: "center",
+  iconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: "center",
+    alignItems: "center",
+    marginRight: 16,
   },
-  label: {
-    fontSize: 13,
-    fontWeight: "700",
+  textContainer: {
+    flex: 1,
   },
-  gpio: {
-    fontSize: 10,
-    color: "#9CA3AF",
-    fontFamily: "monospace",
+  name: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#1F2937",
   },
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  badgeText: {
+  status: {
     fontSize: 12,
-    fontWeight: "700",
+    fontWeight: "800",
+    marginTop: 4,
+  },
+  toggleTrack: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: "center",
+    paddingHorizontal: 2,
+  },
+  toggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  toggleKnobActive: {
+    transform: [{ translateX: 20 }], // Mueve el circulito a la derecha cuando está encendido
   },
 });
