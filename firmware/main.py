@@ -142,13 +142,9 @@ def apply_preset_rules():
     if t[5] % 10 == 0: # Imprime cada 10 segundos para no saturar
         print(f"[DEBUG] Hora:{t[3]:02d}:{t[4]:02d} | Mins: {minutos_actuales} | Rango: {start}-{end} | Estado: {'ON' if luz_encendida else 'OFF'}")
 
-    if luz_encendida and not state["lights"]:
-        print(">> Acción: Encendiendo luz")
-        set_actuator("lights", True, "auto")
-    elif not luz_encendida and state["lights"]:
-        print(">> Acción: Apagando luz")
-        set_actuator("lights", False, "auto")
-    if not state["auto"]: return
+    if luz_encendida != state["lights"]:
+        print(f">> Acción: Cambiando luz a {luz_encendida}")
+        set_actuator("lights", luz_encendida, "auto")
     
     # === FOTOPERÍODO EXACTO BASADO EN RTC ===
     hora_actual = time.localtime()[3] 
