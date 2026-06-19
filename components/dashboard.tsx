@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { ActuatorPanel } from "./actuator-panel";
 import { ConnectionStatus } from "./connection-status";
-import { ScanningModal } from "./scaning-modal";
+import { ScanningModal } from "./scanning-modal";
 import { SensorCard } from "./sensor-card";
 
 export function Dashboard() {
@@ -25,18 +25,97 @@ export function Dashboard() {
     stopScanning,
   } = useESP32();
 
-  const overallStatus = () => {
-    if (!isConnected) return "Desconectado del ESP32";
-    if (sensors.soilMoisture < 40) return "Alerta: Suelo seco";
-    if (sensors.temperature > 28) return "Alerta: Temperatura alta";
-    return "Todo funcionando correctamente";
+  // ── NUEVO SISTEMA DE ALERTAS INDIVIDUALES CON ÍCONOS Y COLORES ──
+  const getAlerts = () => {
+    if (!isConnected) {
+      return [
+        {
+          id: "desc",
+          message: "Desconectado",
+          icon: "🔌",
+          color: "#DC2626",
+          bgColor: "#FEE2E2",
+        },
+      ];
+    }
+
+    const alerts = [];
+
+    // Alertas de Suelo
+    if (sensors.soilMoisture < 40) {
+      alerts.push({
+        id: "soil",
+        message: "Suelo seco",
+        icon: "🏜️",
+        color: "#D97706",
+        bgColor: "#FEF3C7",
+      });
+    }
+
+    // Alertas de Clima
+    if (sensors.temperature > 28) {
+      alerts.push({
+        id: "temp_hi",
+        message: "Temp. alta",
+        icon: "🔥",
+        color: "#DC2626",
+        bgColor: "#FEE2E2",
+      });
+    }
+    if (sensors.temperature < 15 && sensors.temperature > 0) {
+      alerts.push({
+        id: "temp_lo",
+        message: "Temp. baja",
+        icon: "❄️",
+        color: "#2563EB",
+        bgColor: "#DBEAFE",
+      });
+    }
+
+    // Alertas de Nutrientes (pH)
+    if (sensors.ph < 6.0 && sensors.ph > 0) {
+      alerts.push({
+        id: "ph_lo",
+        message: "pH bajo",
+        icon: "🧪",
+        color: "#7C3AED",
+        bgColor: "#EDE9FE",
+      });
+    }
+    if (sensors.ph > 6.5) {
+      alerts.push({
+        id: "ph_hi",
+        message: "pH alto",
+        icon: "⚗️",
+        color: "#7C3AED",
+        bgColor: "#EDE9FE",
+      });
+    }
+
+    // Alertas de Nutrientes (EC)
+    if (sensors.ec < 0.8 && sensors.ec > 0) {
+      alerts.push({
+        id: "ec_lo",
+        message: "EC baja",
+        icon: "📉",
+        color: "#EA580C",
+        bgColor: "#FFEDD5",
+      });
+    }
+    if (sensors.ec > 2.0) {
+      alerts.push({
+        id: "ec_hi",
+        message: "EC alta",
+        icon: "📈",
+        color: "#EA580C",
+        bgColor: "#FFEDD5",
+      });
+    }
+
+    return alerts;
   };
 
-  const statusColor = () => {
-    if (!isConnected) return "#EF4444";
-    if (sensors.soilMoisture < 40 || sensors.temperature > 28) return "#F59E0B";
-    return "#16A34A";
-  };
+  const activeAlerts = getAlerts();
 
   return (
     <View style={{ flex: 1, backgroundColor: "#FAFAF9" }}>
@@ -66,16 +145,53 @@ export function Dashboard() {
               lastUpdate={lastUpdate}
             />
 
-            <View style={styles.statusCard}>
-              <View style={styles.statusContent}>
-                <Text style={styles.emoji}>🌱</Text>
-                <View>
-                  <Text style={styles.statusTitle}>Estado General</Text>
-                  <Text style={[styles.statusOk, { color: statusColor() }]}>
-                    {overallStatus()}
-                  </Text>
+            {/* ── TARJETA DE ESTADO DINÁMICA ── */}
+            <View
+              style={[
+                styles.statusCard,
+                activeAlerts.length > 0 && styles.statusCardAlert,
+              ]}
+            >
+              {activeAlerts.length === 0 ? (
+                <View style={styles.statusContent}>
+                  <Text style={styles.emojiGiant}>🌱</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.statusTitle}>Estado General</Text>
+                    <Text style={styles.statusOk}>
+                      Todo funcionando óptimamente
+                    </Text>
+                  </View>
                 </View>
-              </View>
+              ) : (
+                <View>
+                  <View style={styles.alertHeader}>
+                    <Text style={styles.alertHeaderEmoji}>⚠️</Text>
+                    <Text style={styles.alertHeaderTitle}>
+                      Atención requerida
+                    </Text>
+                  </View>
+
+                  {/* Contenedor Flex para que las "píldoras" se acomoden solas */}
+                  <View style={styles.badgesContainer}>
+                    {activeAlerts.map((alert) => (
+                      <View
+                        key={alert.id}
+                        style={[
+                          styles.badge,
+                          { backgroundColor: alert.bgColor },
+                        ]}
+                      >
+                        <Text style={styles.badgeIcon}>{alert.icon}</Text>
+                        <Text
+                          style={[styles.badgeText, { color: alert.color }]}
+                        >
+                          {alert.message}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              )}
             </View>
 
             <Text style={styles.sectionTitle}>Sensores</Text>
@@ -130,7 +246,7 @@ export function Dashboard() {
               unit=""
               min={5.5}
               max={6.5}
-              color="red"
+              color="purple"
               onIncrease={async () => {}}
               onDecrease={async () => {}}
             />
@@ -179,6 +295,8 @@ const styles = StyleSheet.create({
   title: { fontSize: 36, fontWeight: "bold", color: "#FFFFFF" },
   subtitle: { fontSize: 16, color: "#DCFCE7", marginTop: 4 },
   content: { paddingHorizontal: 24, paddingTop: 24, paddingBottom: 32 },
+
+  // Estilos de la tarjeta de estado general
   statusCard: {
     backgroundColor: "#FFFFFF",
     borderRadius: 16,
@@ -187,10 +305,27 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#DCFCE7",
   },
+  statusCardAlert: { borderColor: "#FECACA", backgroundColor: "#FEF2F2" }, // Fondo rojizo tenue cuando hay alertas
   statusContent: { flexDirection: "row", alignItems: "center", gap: 12 },
-  emoji: { fontSize: 28 },
+  emojiGiant: { fontSize: 28 },
   statusTitle: { fontSize: 16, fontWeight: "600", color: "#374151" },
-  statusOk: { fontSize: 14, fontWeight: "500" },
+  statusOk: { fontSize: 14, fontWeight: "500", color: "#16A34A" },
+
+  // Estilos del nuevo sistema de alertas (Badges)
+  alertHeader: { flexDirection: "row", alignItems: "center", marginBottom: 12 },
+  alertHeaderEmoji: { fontSize: 18, marginRight: 8 },
+  alertHeaderTitle: { fontSize: 16, fontWeight: "700", color: "#DC2626" },
+  badgesContainer: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  badge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+  },
+  badgeIcon: { fontSize: 14, marginRight: 6 },
+  badgeText: { fontSize: 13, fontWeight: "700" },
+
   sectionTitle: {
     fontSize: 20,
     fontWeight: "bold",

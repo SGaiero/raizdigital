@@ -1,13 +1,13 @@
 import { router } from "expo-router";
 import { useEffect, useRef } from "react";
 import {
-    Animated,
-    Dimensions,
-    Modal,
-    Pressable,
-    StyleSheet,
-    Text,
-    View,
+  Animated,
+  Dimensions,
+  Modal,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
 } from "react-native";
 
 const { width } = Dimensions.get("window");
@@ -64,7 +64,6 @@ export function ScanningModal({
     <Modal visible={true} animationType="fade" transparent={false}>
       <View style={styles.loadingContainer}>
         <View style={styles.loadingCenter}>
-          <Text style={styles.emojiGiant}>📡</Text>
           <Text style={styles.loadingTitle}>Buscando hardware</Text>
 
           <ScanProgressBar />
