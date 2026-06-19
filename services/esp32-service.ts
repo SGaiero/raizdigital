@@ -2,17 +2,17 @@
 // Soporta conexión local (LAN) y remota (a través de backend en la nube)
 
 export interface SensorData {
-  soilMoisture: number;  // GPIO 32, ADC1 - Higrómetro (Potenciómetro 10k en PoC)
-  light: number;         // GPIO 34, ADC1 - LDR (Potenciómetro 5k en PoC)
-  temperature: number;   // GPIO 15 - DHT22 (temperatura del aire)
-  humidity: number;      // GPIO 15 - DHT22 (humedad relativa del aire)
-  waterTemp: number;     // GPIO 4  - DS18B20 (temperatura agua/sustrato)
+  soilMoisture: number;
+  temperature: number;
+  humidity: number;
+  waterTemp: number;
+  ph: number;
+  ec: number;
 }
 
 export interface ActuatorStatus {
-  lights: boolean;    // GPIO 16 - LED/Relé SSR Luces
-  extractor: boolean; // GPIO 17 - LED/Relé SSR Extractor
-  pump: boolean;      // GPIO 5  - LED/Relé SSR Bomba
+  extractor: boolean;
+  pump: boolean;
 }
 
 export type ActuatorKey = keyof ActuatorStatus;
@@ -26,8 +26,10 @@ class ESP32Service {
   private mode: ConnectionMode = "local";
 
   setLocalUrl(url: string) {
-    this.baseUrl = url;
+    const cleanUrl = url.trim().replace(/\/+$/, "");
+    this.baseUrl = cleanUrl;
     this.mode = "local";
+    console.log("ESP32 Service configurado a:", this.baseUrl);
   }
 
   setRemoteConnection(backendUrl: string, apiToken: string) {
@@ -57,9 +59,18 @@ class ESP32Service {
     return headers;
   }
 
-  private async fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+  private async fetchWithTimeout(
+    url: string,
+    options: RequestInit = {},
+  ): Promise<Response> {
     const response = await Promise.race([
-      fetch(url, { ...options, headers: { ...this.getHeaders(), ...(options.headers as Record<string, string> || {}) } }),
+      fetch(url, {
+        ...options,
+        headers: {
+          ...this.getHeaders(),
+          ...((options.headers as Record<string, string>) || {}),
+        },
+      }),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error("Timeout")), this.timeout),
       ),
@@ -67,16 +78,67 @@ class ESP32Service {
     return response as Response;
   }
 
+  // Verificar conexión manual antes de forzarla
+  async checkConnection(): Promise<boolean> {
+    try {
+      const response = await this.fetchWithTimeout(this.getUrl("/health"));
+      return response.ok;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Auto-Discovery: Hace 2 pasadas escaneando la red por si el celular tarda en encontrarlo
+  async autoDiscover(
+    baseIpSegment: string = "192.168.1",
+  ): Promise<string | null> {
+    const checkIp = (ip: string): Promise<string | null> => {
+      return new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(null), 500); // Timeout rápido
+        fetch(`http://${ip}/health`)
+          .then((res) => {
+            clearTimeout(timer);
+            resolve(res.ok ? ip : null);
+          })
+          .catch(() => {
+            clearTimeout(timer);
+            resolve(null);
+          });
+      });
+    };
+
+    // 2 pasadas por la red
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 2; i <= 254; i += 20) {
+        const batch = [];
+        for (let j = 0; j < 20 && i + j <= 254; j++) {
+          batch.push(checkIp(`${baseIpSegment}.${i + j}`));
+        }
+        const results = await Promise.all(batch);
+        const found = results.find((ip) => ip !== null);
+
+        if (found) {
+          this.setLocalUrl(`http://${found}`);
+          return found;
+        }
+      }
+      // Pausa entre pasadas
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    return null;
+  }
+
   async getSensorData(): Promise<SensorData> {
     const response = await this.fetchWithTimeout(this.getUrl("/api/sensors"));
     if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
     const data = await response.json();
     return {
-      soilMoisture: data.soilMoisture ?? 0,
-      light: data.light ?? 0,
+      soilMoisture: data.soilMoisturePct ?? 0,
       temperature: data.temperature ?? 0,
       humidity: data.humidity ?? 0,
       waterTemp: data.waterTemp ?? 0,
+      ph: data.ph ?? 0,
+      ec: data.ec ?? 0,
     };
   }
 
@@ -85,13 +147,15 @@ class ESP32Service {
     if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
     const data = await response.json();
     return {
-      lights: data.lights ?? false,
       extractor: data.extractor ?? false,
       pump: data.pump ?? false,
     };
   }
 
-  async toggleActuator(actuator: ActuatorKey, isActive: boolean): Promise<void> {
+  async toggleActuator(
+    actuator: ActuatorKey,
+    isActive: boolean,
+  ): Promise<void> {
     const response = await this.fetchWithTimeout(
       this.getUrl(`/api/actuators/${actuator}`),
       { method: "POST", body: JSON.stringify({ isActive }) },
