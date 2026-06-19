@@ -25,6 +25,9 @@ class ESP32Service {
   private timeout: number = 5000;
   private mode: ConnectionMode = "local";
 
+  // ── CANDADO PARA EVITAR DOBLE ESCANEO EN REACT STRICT MODE ──
+  private isDiscovering: boolean = false;
+
   setLocalUrl(url: string) {
     const cleanUrl = url.trim().replace(/\/+$/, "");
     this.baseUrl = cleanUrl;
@@ -43,9 +46,7 @@ class ESP32Service {
   }
 
   private getUrl(endpoint: string): string {
-    if (this.mode === "remote") {
-      return `${this.backendUrl}${endpoint}`;
-    }
+    if (this.mode === "remote") return `${this.backendUrl}${endpoint}`;
     return `${this.baseUrl}${endpoint}`;
   }
 
@@ -53,9 +54,8 @@ class ESP32Service {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (this.mode === "remote") {
+    if (this.mode === "remote")
       headers.Authorization = `Bearer ${this.apiToken}`;
-    }
     return headers;
   }
 
@@ -78,7 +78,6 @@ class ESP32Service {
     return response as Response;
   }
 
-  // Verificar conexión manual antes de forzarla
   async checkConnection(): Promise<boolean> {
     try {
       const response = await this.fetchWithTimeout(this.getUrl("/health"));
@@ -88,46 +87,56 @@ class ESP32Service {
     }
   }
 
-  // Auto-Discovery: Hace 2 pasadas escaneando la red por si el celular tarda en encontrarlo
-  async autoDiscover(
-    baseIpSegment: string = "192.168.1",
-  ): Promise<string | null> {
-    const checkIp = (ip: string): Promise<string | null> => {
-      return new Promise((resolve) => {
-        const timer = setTimeout(() => resolve(null), 500); // Timeout rápido
-        fetch(`http://${ip}/health`)
-          .then((res) => {
-            clearTimeout(timer);
-            resolve(res.ok ? ip : null);
-          })
-          .catch(() => {
-            clearTimeout(timer);
-            resolve(null);
+  // ── Auto-Discovery Protegido ──
+  async autoDiscover(baseIpSegments: string[]): Promise<string | null> {
+    // Si ya hay un escaneo corriendo en el fondo, ignoramos la petición para no saturar
+    if (this.isDiscovering) return null;
+    this.isDiscovering = true;
+
+    try {
+      const checkIp = async (ip: string): Promise<string | null> => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 900);
+
+          const response = await fetch(`http://${ip}/health`, {
+            signal: controller.signal,
+            headers: { "Cache-Control": "no-cache" },
           });
-      });
-    };
 
-    // 2 pasadas por la red
-    for (let pass = 0; pass < 2; pass++) {
-      for (let i = 2; i <= 254; i += 20) {
-        const batch = [];
-        for (let j = 0; j < 20 && i + j <= 254; j++) {
-          batch.push(checkIp(`${baseIpSegment}.${i + j}`));
+          clearTimeout(timeoutId);
+          return response.ok ? ip : null;
+        } catch (error) {
+          return null;
         }
-        const results = await Promise.all(batch);
-        const found = results.find((ip) => ip !== null);
+      };
 
-        if (found) {
-          this.setLocalUrl(`http://${found}`);
-          return found;
+      for (const baseSegment of baseIpSegments) {
+        console.log(`Escaneando red: ${baseSegment}.x`);
+
+        for (let i = 2; i <= 254; i += 15) {
+          const batch = [];
+          for (let j = 0; j < 15 && i + j <= 254; j++) {
+            batch.push(checkIp(`${baseSegment}.${i + j}`));
+          }
+
+          const results = await Promise.all(batch);
+          const found = results.find((ip) => ip !== null);
+
+          if (found) {
+            this.setLocalUrl(`http://${found}`);
+            return found;
+          }
         }
       }
-      // Pausa entre pasadas
-      await new Promise((r) => setTimeout(r, 1000));
+      return null;
+    } finally {
+      // Liberamos el candado al terminar
+      this.isDiscovering = false;
     }
-    return null;
   }
 
+  // ── RESTO DE LOS MÉTODOS IGUALES ──
   async getSensorData(): Promise<SensorData> {
     const response = await this.fetchWithTimeout(this.getUrl("/api/sensors"));
     if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
@@ -146,10 +155,7 @@ class ESP32Service {
     const response = await this.fetchWithTimeout(this.getUrl("/api/actuators"));
     if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
     const data = await response.json();
-    return {
-      extractor: data.extractor ?? false,
-      pump: data.pump ?? false,
-    };
+    return { extractor: data.extractor ?? false, pump: data.pump ?? false };
   }
 
   async toggleActuator(

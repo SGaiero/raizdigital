@@ -1,5 +1,4 @@
-import { esp32Service, type ActuatorKey } from "@/services/esp32-service";
-import { useCallback, useEffect, useState } from "react";
+import { useESP32 } from "@/hooks/use-esp32";
 import {
   RefreshControl,
   ScrollView,
@@ -9,251 +8,163 @@ import {
 } from "react-native";
 import { ActuatorPanel } from "./actuator-panel";
 import { ConnectionStatus } from "./connection-status";
+import { ScanningModal } from "./scaning-modal";
 import { SensorCard } from "./sensor-card";
 
 export function Dashboard() {
-  // Sensores
-  const [soilMoisture, setSoilMoisture] = useState(65);
-  const [temperature, setTemperature] = useState(24);
-  const [humidity, setHumidity] = useState(60);
-  const [waterTemp, setWaterTemp] = useState(22);
-  const [ph, setPh] = useState(6.0);
-  const [ec, setEc] = useState(1.0);
-
-  // Actuadores
-  const [extractor, setExtractor] = useState(false);
-  const [pump, setPump] = useState(false);
-
-  // UI
-  const [isConnected, setIsConnected] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date | undefined>();
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const loadData = useCallback(async () => {
-    try {
-      const [sensorData, actuatorStatus] = await Promise.all([
-        esp32Service.getSensorData(),
-        esp32Service.getActuatorStatus(),
-      ]);
-
-      setSoilMoisture(sensorData.soilMoisture);
-      setTemperature(sensorData.temperature);
-      setHumidity(sensorData.humidity);
-      setWaterTemp(sensorData.waterTemp);
-      setPh(sensorData.ph);
-      setEc(sensorData.ec);
-
-      setExtractor(actuatorStatus.extractor);
-      setPump(actuatorStatus.pump);
-
-      setIsConnected(true);
-      setLastUpdate(new Date());
-    } catch {
-      setIsConnected(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 2000);
-    return () => clearInterval(interval);
-  }, [loadData]);
-
-  const onRefresh = useCallback(() => {
-    setIsRefreshing(true);
-    loadData().finally(() => setIsRefreshing(false));
-  }, [loadData]);
-
-  // Sensor overrides (para testing/simulación)
-  const makeSensorHandler = (
-    getter: number,
-    setter: (v: number) => void,
-    sensor: string,
-    step: number,
-    min: number,
-    max: number,
-  ) => ({
-    onIncrease: async () => {
-      const v = Math.min(max, getter + step);
-      setter(v);
-      try {
-        await esp32Service.updateSensorValue(sensor, v);
-      } catch {}
-    },
-    onDecrease: async () => {
-      const v = Math.max(min, getter - step);
-      setter(v);
-      try {
-        await esp32Service.updateSensorValue(sensor, v);
-      } catch {}
-    },
-  });
-
-  const soilHandlers = makeSensorHandler(
-    soilMoisture,
-    setSoilMoisture,
-    "soilMoisture",
-    5,
-    0,
-    100,
-  );
-  const tempHandlers = makeSensorHandler(
-    temperature,
-    setTemperature,
-    "temperature",
-    1,
-    0,
-    40,
-  );
-  const humidityHandlers = makeSensorHandler(
-    humidity,
-    setHumidity,
-    "humidity",
-    5,
-    0,
-    100,
-  );
-  const waterTempHandlers = makeSensorHandler(
-    waterTemp,
-    setWaterTemp,
-    "waterTemp",
-    1,
-    0,
-    40,
-  );
-  const phHandlers = makeSensorHandler(ph, setPh, "ph", 0.5, 0, 14);
-  const ecHandlers = makeSensorHandler(ec, setEc, "ec", 0.1, 0, 5);
-
-  const handleActuatorToggle = async (actuator: ActuatorKey) => {
-    const current = { extractor, pump }[actuator];
-    const newState = !current;
-    if (actuator === "extractor") setExtractor(newState);
-    else setPump(newState);
-    try {
-      await esp32Service.toggleActuator(actuator, newState);
-    } catch {}
-  };
+  const {
+    sensors,
+    actuators,
+    isConnected,
+    isInitializing,
+    showDelayedMessage,
+    lastUpdate,
+    isRefreshing,
+    onRefresh,
+    toggleActuator,
+    stopScanning,
+  } = useESP32();
 
   const overallStatus = () => {
     if (!isConnected) return "Desconectado del ESP32";
-    if (soilMoisture < 40) return "Alerta: Suelo seco";
-    if (temperature > 28) return "Alerta: Temperatura alta";
+    if (sensors.soilMoisture < 40) return "Alerta: Suelo seco";
+    if (sensors.temperature > 28) return "Alerta: Temperatura alta";
     return "Todo funcionando correctamente";
   };
 
   const statusColor = () => {
     if (!isConnected) return "#EF4444";
-    if (soilMoisture < 40 || temperature > 28) return "#F59E0B";
+    if (sensors.soilMoisture < 40 || sensors.temperature > 28) return "#F59E0B";
     return "#16A34A";
   };
 
   return (
-    <ScrollView
-      style={styles.container}
-      refreshControl={
-        <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
-      }
-    >
-      <View style={styles.header}>
-        <Text style={styles.title}>Raíz Digital</Text>
-        <Text style={styles.subtitle}>Sistema de automatización de biomas</Text>
-      </View>
+    <View style={{ flex: 1, backgroundColor: "#FAFAF9" }}>
+      <ScanningModal
+        visible={isInitializing}
+        showDelayedMessage={showDelayedMessage}
+        onStopScanning={stopScanning}
+      />
 
-      <View style={styles.content}>
-        <ConnectionStatus isConnected={isConnected} lastUpdate={lastUpdate} />
-        <View style={styles.statusCard}>
-          <View style={styles.statusContent}>
-            <Text style={styles.emoji}>🌱</Text>
-            <View>
-              <Text style={styles.statusTitle}>Estado General</Text>
-              <Text style={[styles.statusOk, { color: statusColor() }]}>
-                {overallStatus()}
+      {!isInitializing && (
+        <ScrollView
+          style={styles.container}
+          refreshControl={
+            <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} />
+          }
+        >
+          <View style={styles.header}>
+            <Text style={styles.title}>Raíz Digital</Text>
+            <Text style={styles.subtitle}>
+              Sistema de automatización de biomas
+            </Text>
+          </View>
+
+          <View style={styles.content}>
+            <ConnectionStatus
+              isConnected={isConnected}
+              lastUpdate={lastUpdate}
+            />
+
+            <View style={styles.statusCard}>
+              <View style={styles.statusContent}>
+                <Text style={styles.emoji}>🌱</Text>
+                <View>
+                  <Text style={styles.statusTitle}>Estado General</Text>
+                  <Text style={[styles.statusOk, { color: statusColor() }]}>
+                    {overallStatus()}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <Text style={styles.sectionTitle}>Sensores</Text>
+            <SensorCard
+              icon="droplets"
+              label="Humedad del Suelo"
+              value={sensors.soilMoisture}
+              unit="%"
+              min={40}
+              max={80}
+              color="blue"
+              onIncrease={async () => {}}
+              onDecrease={async () => {}}
+            />
+            <SensorCard
+              icon="thermometer"
+              label="Temperatura Aire"
+              value={sensors.temperature}
+              unit="°C"
+              min={18}
+              max={28}
+              color="red"
+              onIncrease={async () => {}}
+              onDecrease={async () => {}}
+            />
+            <SensorCard
+              icon="wind"
+              label="Humedad Aire (DHT22)"
+              value={sensors.humidity}
+              unit="%"
+              min={40}
+              max={80}
+              color="green"
+              onIncrease={async () => {}}
+              onDecrease={async () => {}}
+            />
+            <SensorCard
+              icon="thermometer"
+              label="Temp. Agua/Sustrato"
+              value={sensors.waterTemp}
+              unit="°C"
+              min={15}
+              max={25}
+              color="blue"
+              onIncrease={async () => {}}
+              onDecrease={async () => {}}
+            />
+            <SensorCard
+              icon="activity"
+              label="pH"
+              value={sensors.ph}
+              unit=""
+              min={5.5}
+              max={6.5}
+              color="red"
+              onIncrease={async () => {}}
+              onDecrease={async () => {}}
+            />
+            <SensorCard
+              icon="zap"
+              label="Electroconductividad"
+              value={sensors.ec}
+              unit="mS/cm"
+              min={0.8}
+              max={2.0}
+              color="orange"
+              onIncrease={async () => {}}
+              onDecrease={async () => {}}
+            />
+
+            <Text style={styles.sectionTitle}>Actuadores</Text>
+            <ActuatorPanel
+              extractor={actuators.extractor}
+              pump={actuators.pump}
+              onToggle={toggleActuator}
+            />
+
+            <View style={styles.tipsCard}>
+              <Text style={styles.tipsTitle}>📊 Rangos óptimos</Text>
+              <Text style={styles.tipsText}>
+                {
+                  "• Humedad suelo: 40–80%\n• Temp. aire: 18–28°C  •  Humedad aire: 40–80%\n• Temp. agua/sustrato: 15–25°C\n• pH: 6.0–6.5  •  EC: 0.8–2.0 mS/cm"
+                }
               </Text>
             </View>
           </View>
-        </View>
-        {/* ── SENSORES ── */}
-        <Text style={styles.sectionTitle}>Sensores</Text>
-        <SensorCard
-          icon="droplets"
-          label="Humedad del Suelo"
-          value={soilMoisture}
-          unit="%"
-          min={40}
-          max={80}
-          color="blue"
-          {...soilHandlers}
-        />
-        <SensorCard
-          icon="thermometer"
-          label="Temperatura Aire"
-          value={temperature}
-          unit="°C"
-          min={18}
-          max={28}
-          color="red"
-          {...tempHandlers}
-        />
-        <SensorCard
-          icon="wind"
-          label="Humedad Aire (DHT22)"
-          value={humidity}
-          unit="%"
-          min={40}
-          max={80}
-          color="green"
-          {...humidityHandlers}
-        />
-        <SensorCard
-          icon="thermometer"
-          label="Temp. Agua/Sustrato"
-          value={waterTemp}
-          unit="°C"
-          min={15}
-          max={25}
-          color="blue"
-          {...waterTempHandlers}
-        />
-        <SensorCard
-          icon="activity"
-          label="pH"
-          value={ph}
-          unit=""
-          min={5.5}
-          max={6.5}
-          color="red"
-          {...phHandlers}
-        />
-        <SensorCard
-          icon="zap"
-          label="Electroconductividad"
-          value={ec}
-          unit="mS/cm"
-          min={0.8}
-          max={2.0}
-          color="orange"
-          {...ecHandlers}
-        />
-        {/* ── ACTUADORES ── */}
-        <Text style={styles.sectionTitle}>Actuadores</Text>
-        <Text style={styles.sectionSubtitle}>
-          Toca para alternar — la máquina de estados automática usa histéresis
-        </Text>
-        <ActuatorPanel
-          extractor={extractor}
-          pump={pump}
-          onToggle={handleActuatorToggle}
-        />
-        <View style={styles.tipsCard}>
-          <Text style={styles.tipsTitle}>📊 Rangos óptimos</Text>
-          <Text style={styles.tipsText}>
-            {
-              "• Humedad suelo: 40–80%\n• Temp. aire: 18–28°C  •  Humedad aire: 40–80%\n• Temp. agua/sustrato: 15–25°C\n• pH: 6.0–6.5  •  EC: 0.8–2.0 mS/cm"
-            }
-          </Text>
-        </View>
-      </View>
-    </ScrollView>
+        </ScrollView>
+      )}
+    </View>
   );
 }
 
@@ -284,13 +195,8 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "bold",
     color: "#1F2937",
-    marginBottom: 4,
-    marginTop: 8,
-  },
-  sectionSubtitle: {
-    fontSize: 12,
-    color: "#9CA3AF",
     marginBottom: 16,
+    marginTop: 8,
   },
   tipsCard: {
     backgroundColor: "#F0FDF4",
@@ -298,6 +204,7 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: "#BBFBBB",
+    marginTop: 16,
   },
   tipsTitle: {
     fontSize: 16,
