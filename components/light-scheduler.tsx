@@ -68,7 +68,21 @@ export function LightScheduler({
             color={isLightsOn ? "#D97706" : "#6B7280"}
           />
         </View>
-        <Text style={styles.title}>Fotoperíodo</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.title}>Fotoperíodo</Text>
+          {/* INDICADOR VISUAL DE ESTADO */}
+          <View style={styles.statusBadge}>
+            <View
+              style={[
+                styles.dot,
+                { backgroundColor: isLightsOn ? "#D97706" : "#9CA3AF" },
+              ]}
+            />
+            <Text style={styles.statusText}>
+              {isLightsOn ? "Encendido" : "Apagado"}
+            </Text>
+          </View>
+        </View>
       </View>
 
       <View style={styles.controlsRow}>
@@ -159,6 +173,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 12,
   },
+  statusBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 4,
+    gap: 6,
+  },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { fontSize: 12, fontWeight: "600", color: "#4B5563" },
   iconOn: { backgroundColor: "#FEF3C7" },
   iconOff: { backgroundColor: "#F3F4F6" },
   title: { fontSize: 18, fontWeight: "bold" },

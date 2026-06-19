@@ -19,12 +19,17 @@ def load_config():
     try:
         with open(CONFIG_FILE, "r") as f:
             conf = ujson.loads(f.read())
-            # Horarios por defecto si es la primera vez (18/6 vegetativo)
-            if "light_start" not in conf: conf["light_start"] = 6
-            if "light_end" not in conf: conf["light_end"] = 24
+        
+            if conf.get("light_start", 0) < 100:
+                print("Detectada configuración antigua en horas. Convirtiendo a minutos...")
+                conf["light_start"] = conf["light_start"] * 60
+                conf["light_end"] = conf["light_end"] * 60
+                save_config_dict(conf) 
+            
             return conf
     except:
-        return {"ssid": "", "password": "", "light_start": 6, "light_end": 24}
+        # Si el archivo está corrupto o no existe, devolvemos los valores por defecto en minutos
+        return {"ssid": "", "password": "", "light_start": 360, "light_end": 1440}
 
 def save_config_dict(data):
     with open(CONFIG_FILE, "w") as f:
@@ -116,6 +121,33 @@ def set_actuator(actuator, is_active, source="manual"):
     PIN_MAP[actuator].value(1 if is_active else 0)
 
 def apply_preset_rules():
+    if not state["auto"]: return
+    
+    t = time.localtime()
+    minutos_actuales = t[3] * 60 + t[4]
+    
+    start = system_config.get("light_start", 360)
+    end = system_config.get("light_end", 1439) # Si viene 0, lo tratamos como 1440
+    if end == 0: end = 1440
+    
+    # Lógica de fotoperíodo corregida
+    if start < end:
+        # Ejemplo: 06:00 a 20:00
+        luz_encendida = start <= minutos_actuales < end
+    else:
+        # Ejemplo: 20:00 a 06:00 (cruza medianoche)
+        luz_encendida = minutos_actuales >= start or minutos_actuales < 1440 or minutos_actuales < end
+
+    # --- DEBUG MEJORADO ---
+    if t[5] % 10 == 0: # Imprime cada 10 segundos para no saturar
+        print(f"[DEBUG] Hora:{t[3]:02d}:{t[4]:02d} | Mins: {minutos_actuales} | Rango: {start}-{end} | Estado: {'ON' if luz_encendida else 'OFF'}")
+
+    if luz_encendida and not state["lights"]:
+        print(">> Acción: Encendiendo luz")
+        set_actuator("lights", True, "auto")
+    elif not luz_encendida and state["lights"]:
+        print(">> Acción: Apagando luz")
+        set_actuator("lights", False, "auto")
     if not state["auto"]: return
     
     # === FOTOPERÍODO EXACTO BASADO EN RTC ===

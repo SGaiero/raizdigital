@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 interface ActuatorPanelProps {
   extractor: boolean;
   pump: boolean;
-  // lights: boolean; // <-- Agregamos la luz
+  // lights: boolean;
   onToggle: (actuator: ActuatorKey) => Promise<void>;
 }
 
@@ -15,7 +15,6 @@ export function ActuatorPanel({
   // lights,
   onToggle,
 }: ActuatorPanelProps) {
-  // Componente interno para que todas las tarjetas sean idénticas
   const ActuatorCard = ({
     name,
     isActive,
@@ -23,20 +22,11 @@ export function ActuatorPanel({
     actuatorKey,
     activeColor,
     activeBg,
-  }: {
-    name: string;
-    isActive: boolean;
-    iconName: keyof typeof Feather.glyphMap;
-    actuatorKey: ActuatorKey;
-    activeColor: string;
-    activeBg: string;
-  }) => (
+  }: any) => (
     <Pressable
       style={[
         styles.card,
-        isActive
-          ? { borderColor: activeColor, backgroundColor: "#FAFAFA" }
-          : {},
+        isActive ? { borderColor: activeColor, borderWidth: 2 } : {}, // Borde más grueso si está activo
       ]}
       onPress={() => onToggle(actuatorKey)}
     >
@@ -55,14 +45,25 @@ export function ActuatorPanel({
 
       <View style={styles.textContainer}>
         <Text style={styles.name}>{name}</Text>
-        <Text
-          style={[styles.status, { color: isActive ? activeColor : "#6B7280" }]}
-        >
-          {isActive ? "ENCENDIDO" : "APAGADO"}
-        </Text>
+        <View style={styles.statusRow}>
+          {/* LED INDICADOR */}
+          <View
+            style={[
+              styles.indicator,
+              { backgroundColor: isActive ? activeColor : "#D1D5DB" },
+            ]}
+          />
+          <Text
+            style={[
+              styles.status,
+              { color: isActive ? activeColor : "#6B7280" },
+            ]}
+          >
+            {isActive ? "ENCENDIDO" : "APAGADO"}
+          </Text>
+        </View>
       </View>
 
-      {/* Switch visual */}
       <View
         style={[
           styles.toggleTrack,
@@ -83,25 +84,23 @@ export function ActuatorPanel({
         isActive={extractor}
         iconName="wind"
         actuatorKey="extractor"
-        activeColor="#0284C7" // Azul cielo
+        activeColor="#0284C7"
         activeBg="#E0F2FE"
       />
-
       <ActuatorCard
         name="Bomba de Riego"
         isActive={pump}
         iconName="droplet"
         actuatorKey="pump"
-        activeColor="#2563EB" // Azul agua
+        activeColor="#2563EB"
         activeBg="#DBEAFE"
       />
-
       {/* <ActuatorCard
         name="Luz (Fotoperíodo)"
         isActive={lights}
         iconName="sun"
         actuatorKey="lights"
-        activeColor="#D97706" // Ámbar/Naranja
+        activeColor="#D97706"
         activeBg="#FEF3C7"
       /> */}
     </View>
@@ -109,10 +108,7 @@ export function ActuatorPanel({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    gap: 12, // Espacio entre las tarjetas
-    marginBottom: 24,
-  },
+  container: { gap: 12, marginBottom: 24 },
   card: {
     flexDirection: "row",
     alignItems: "center",
@@ -130,19 +126,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginRight: 16,
   },
-  textContainer: {
-    flex: 1,
-  },
-  name: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#1F2937",
-  },
-  status: {
-    fontSize: 12,
-    fontWeight: "800",
+  textContainer: { flex: 1 },
+  name: { fontSize: 16, fontWeight: "600", color: "#1F2937" },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
     marginTop: 4,
+    gap: 6,
   },
+  // Estilo del LED
+  indicator: { width: 8, height: 8, borderRadius: 4 },
+  status: { fontSize: 12, fontWeight: "800" },
   toggleTrack: {
     width: 44,
     height: 24,
@@ -155,13 +149,6 @@ const styles = StyleSheet.create({
     height: 20,
     borderRadius: 10,
     backgroundColor: "#FFFFFF",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 2,
   },
-  toggleKnobActive: {
-    transform: [{ translateX: 20 }], // Mueve el circulito a la derecha cuando está encendido
-  },
+  toggleKnobActive: { transform: [{ translateX: 20 }] },
 });
